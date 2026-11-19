@@ -245,9 +245,20 @@ async function openTracks(ctx: ReadCtx, ownerId: string) {
 
 async function openLogs(ctx: ReadCtx, ownerId: string) {
   const rows = await ownerRows<LogRow>(ctx, "logs", ownerId);
-  return Promise.all(
+  const logs = await Promise.all(
     rows.map(async (row) => logView({ ...row, log: await open(ctx, `${scopeFor("logs", ownerId, row.jobKey)}|log`, row.log) })),
   );
+  // Newest first: the day the entry describes, then when it was written. A batch inserted in one go
+  // can share a createdAt, so the later row in insertion order breaks that tie.
+  return logs
+    .map((log, index) => ({ log, index }))
+    .sort(
+      (a, b) =>
+        b.log.date.localeCompare(a.log.date) ||
+        b.log.createdAt.localeCompare(a.log.createdAt) ||
+        b.index - a.index,
+    )
+    .map(({ log }) => log);
 }
 
 export async function workspace(ctx: ReadCtx, ownerId: string) {
