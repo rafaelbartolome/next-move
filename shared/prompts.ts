@@ -19,7 +19,7 @@ export const MCP_KEY_DAYS = 90;
 function connectSection({ origin, mode, code, expiresAt }: PromptOptions): string {
   if (mode === "mcp") {
     return `## Connect
-Use the Next move MCP tools: get_context, save_profile, save_tracks, save_jobs, save_company_icons and log_run. If they aren't available, stop and tell me to connect the Next move MCP server first.`;
+Use the Next move MCP tools: get_context, save_profile, save_tracks, save_jobs, save_company_icons, add_logs and log_run. If they aren't available, stop and tell me to connect the Next move MCP server first.`;
   }
   return `## Connect
 1. Exchange my one-time code for an API key. Do this once:
@@ -130,6 +130,7 @@ Next move is the user's job-search tracker. You do the research; these tools sto
 ## Workflows
 - Onboarding (no profile yet): ask the user for their CV and/or LinkedIn text, the roles they want with salary targets, where they live and can work, remote preference, and dealbreakers. Summarize; show them the profile and roles; save after they confirm (save_profile, save_tracks). Then run a first search.
 - Update: get_context; recheck open listings whose lastVerified is more than 14 days old; add icons to tracked jobs whose companyIcon is empty (save_company_icons); search for new openings for each active role; save_jobs in batches of up to 25; log_run.
+- Log entries: append a dated markdown entry to a specific tracked opening with add_logs (jobKey + date + markdown). You can add entries but never read them back.
 
 ${PROFILE_FIELDS}
 

@@ -321,7 +321,7 @@ export default function OpportunitiesPage() {
         </section>
       )}
 
-      <JobDetail job={openJob} track={tracks.find((t) => t.key === openJob?.trackKey)} today={data.today} onClose={() => setOpenId(null)} />
+      <JobDetail job={openJob} track={tracks.find((t) => t.key === openJob?.trackKey)} today={data.today} logs={data.logs} onClose={() => setOpenId(null)} />
     </>
   );
 }

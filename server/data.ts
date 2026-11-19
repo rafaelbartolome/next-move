@@ -10,10 +10,12 @@ import {
   canonicalUrl,
   validateIcons,
   validateJobs,
+  validateLogs,
   validateProfile,
   validateRun,
   validateTracks,
   type JobInput,
+  type LogInput,
   type ProfileInput,
   type Status,
   type TrackInput,
@@ -120,6 +122,13 @@ type RunRow = Row & {
   closed: string;
 };
 
+type LogRow = Row & {
+  ownerId: string;
+  jobKey: string;
+  date: string;
+  log: string;
+};
+
 /** A request problem the caller can fix; never thrown after a write has started. */
 export class RequestError extends Error {
   status: number;
@@ -213,6 +222,17 @@ export function jobView(row: JobRow) {
   };
 }
 
+export function logView(row: LogRow) {
+  return {
+    id: row.id,
+    jobKey: row.jobKey,
+    date: row.date,
+    log: row.log,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 async function openProfile(ctx: ReadCtx, ownerId: string) {
   const [row] = await ownerRows<ProfileRow>(ctx, "profiles", ownerId);
   return row ? profileView(await openRow(ctx, "profiles", row)) : null;
@@ -223,14 +243,21 @@ async function openTracks(ctx: ReadCtx, ownerId: string) {
   return Promise.all(rows.map(async (row) => trackView(await openRow(ctx, "tracks", row))));
 }
 
+async function openLogs(ctx: ReadCtx, ownerId: string) {
+  const rows = await ownerRows<LogRow>(ctx, "logs", ownerId);
+  return Promise.all(
+    rows.map(async (row) => logView({ ...row, log: await open(ctx, `${scopeFor("logs", ownerId, row.jobKey)}|log`, row.log) })),
+  );
+}
+
 export async function workspace(ctx: ReadCtx, ownerId: string) {
-  const jobRows = await ownerRows<JobRow>(ctx, "jobs", ownerId);
-  const [profile, tracks, jobs] = await Promise.all([
+  const [profile, tracks, jobs, logs] = await Promise.all([
     openProfile(ctx, ownerId),
     openTracks(ctx, ownerId),
-    Promise.all(jobRows.map(async (row) => jobView(await openRow(ctx, "jobs", row)))),
+    Promise.all((await ownerRows<JobRow>(ctx, "jobs", ownerId)).map(async (row) => jobView(await openRow(ctx, "jobs", row)))),
+    openLogs(ctx, ownerId),
   ]);
-  return { today: todayIso(), profile, tracks, jobs };
+  return { today: todayIso(), profile, tracks, jobs, logs };
 }
 
 // ---------- Agent operations ----------
@@ -453,6 +480,23 @@ export async function logRun(ctx: WriteCtx, key: KeyRow, raw: unknown) {
   return { logged: true };
 }
 
+/** Appends dated markdown entries to tracked openings. Agents add but never read them back. */
+export async function addLogs(ctx: WriteCtx, ownerId: string, raw: unknown) {
+  const logs = validateLogs(raw, todayIso());
+  const jobs = await ownerRows<JobRow>(ctx, "jobs", ownerId);
+  const jobKeys = new Set(jobs.map((job) => job.key));
+  const problems = logs.flatMap((entry, index) =>
+    jobKeys.has(entry.jobKey) ? [] : [`logs[${index}].jobKey "${entry.jobKey}" isn't a tracked job`],
+  );
+  if (problems.length) throw new ContractError(problems);
+  const sealed = await Promise.all(logs.map((entry) => seal(ctx, `${scopeFor("logs", ownerId, entry.jobKey)}|log`, entry.log)));
+  for (const [index, entry] of logs.entries()) {
+    await ctx.db.logs.insert({ ownerId, jobKey: entry.jobKey, date: entry.date, log: sealed[index] });
+  }
+  ctx.invalidate("workspace");
+  return { added: logs.length };
+}
+
 // ---------- User-only operations ----------
 
 async function ownedJob(ctx: WriteCtx, ownerId: string, jobId: string): Promise<JobRow> {
@@ -484,8 +528,43 @@ export async function setTrackActive(ctx: WriteCtx, ownerId: string, trackId: st
   ctx.invalidate("workspace");
 }
 
+async function ownedLog(ctx: WriteCtx, ownerId: string, logId: string): Promise<LogRow> {
+  const row = (await ctx.db.logs.get(logId)) as LogRow | null;
+  if (!row || row.ownerId !== ownerId) throw new Error("That log entry isn't yours.");
+  return row;
+}
+
+export async function addLog(ctx: WriteCtx, ownerId: string, jobKey: string, date: string, log: string) {
+  const [entry] = validateLogs([{ jobKey, date, log }], todayIso());
+  const jobs = await ownerRows<JobRow>(ctx, "jobs", ownerId);
+  if (!jobs.some((job) => job.key === entry.jobKey)) throw new Error("That job isn't in your tracker.");
+  await ctx.db.logs.insert({
+    ownerId,
+    jobKey: entry.jobKey,
+    date: entry.date,
+    log: await seal(ctx, `${scopeFor("logs", ownerId, entry.jobKey)}|log`, entry.log),
+  });
+  ctx.invalidate("workspace");
+}
+
+export async function setLog(ctx: WriteCtx, ownerId: string, logId: string, date: string, log: string) {
+  const row = await ownedLog(ctx, ownerId, logId);
+  const [entry] = validateLogs([{ jobKey: row.jobKey, date, log }], todayIso());
+  await ctx.db.logs.update(row.id, {
+    date: entry.date,
+    log: await seal(ctx, `${scopeFor("logs", ownerId, row.jobKey)}|log`, entry.log),
+  });
+  ctx.invalidate("workspace");
+}
+
+export async function deleteLog(ctx: WriteCtx, ownerId: string, logId: string) {
+  const row = await ownedLog(ctx, ownerId, logId);
+  await ctx.db.logs.delete(row.id);
+  ctx.invalidate("workspace");
+}
+
 /** Every table with rows that belong to one person. Membership goes last. */
-const OWNED_TABLES = ["jobs", "tracks", "profiles", "runs", "agentKeys", "handoffs", "members"] as const;
+const OWNED_TABLES = ["jobs", "tracks", "profiles", "runs", "agentKeys", "handoffs", "members", "logs"] as const;
 
 /**
  * "Delete my data". Removes every row stored under any of the owner's IDs (see

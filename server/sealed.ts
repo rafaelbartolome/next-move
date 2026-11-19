@@ -16,6 +16,7 @@ export const SEALED = {
   tracks: ["title", "seniority", "salaryTarget", "salaryCurrency", "salaryBasis", "searchNotes"],
   jobs: ["fit", "eligibility", "fitSummary", "caveats", "salaryNote", "status", "notes"],
   runs: ["summary"],
+  logs: ["log"],
 } as const;
 
 export type SealedTable = keyof typeof SEALED;
@@ -44,7 +45,7 @@ function pick(row: Row, fields: readonly string[]): Record<string, string> {
   return Object.fromEntries(fields.map((field) => [field, String(row[field] ?? "")]));
 }
 
-const OWNED = ["profiles", "tracks", "jobs", "runs", "agentKeys", "handoffs", "members"] as const;
+const OWNED = ["profiles", "tracks", "jobs", "runs", "agentKeys", "handoffs", "members", "logs"] as const;
 
 /**
  * Upgrades everything a pre-encryption owner has: the raw account ID becomes its keyed

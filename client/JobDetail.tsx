@@ -1,10 +1,11 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { useMutation } from "@spacefast/zero/client";
-import { Alert, Badge, Button, TextArea } from "@spacefast/zero/kit";
+import { Alert, Badge, Button, Input, TextArea } from "@spacefast/zero/kit";
 import { ELIGIBILITY_LABELS, STATUSES, STATUS_LABELS, WORKPLACE_LABELS, type Status } from "../shared/contract";
-import type { Job, Track } from "./types";
+import type { Job, Log, Track } from "./types";
 import { Drawer } from "./Drawer";
+import { renderMarkdown } from "./markdown";
 import { CompanyMark, FitBadge, Select, formatDate, formatDateTime, needsRecheck } from "./ui";
 
 function Section({ title, children }: { title: string; children: ComponentChildren }) {
@@ -27,13 +28,21 @@ function Bullets({ items }: { items: string[] }) {
   );
 }
 
-export function JobDetail({ job, track, today, onClose }: { job: Job | null; track: Track | undefined; today: string; onClose: () => void }) {
+export function JobDetail({ job, track, today, logs, onClose }: { job: Job | null; track: Track | undefined; today: string; logs: Log[]; onClose: () => void }) {
   const setStatus = useMutation<[jobId: string, status: Status], void>("setStatus");
   const saveNotes = useMutation<[jobId: string, notes: string], void>("saveNotes");
+  const addLog = useMutation<[jobKey: string, date: string, log: string], void>("addLog");
+  const setLog = useMutation<[logId: string, date: string, log: string], void>("setLog");
+  const deleteLog = useMutation<[logId: string], void>("deleteLog");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [warnUnsaved, setWarnUnsaved] = useState(false);
   const [error, setError] = useState("");
+  const [logDate, setLogDate] = useState(today);
+  const [logText, setLogText] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [logBusy, setLogBusy] = useState(false);
+  const [logError, setLogError] = useState("");
   // Closing is two steps: the drawer slides out, then onClose unmounts it.
   const [closing, setClosing] = useState(false);
 
@@ -43,10 +52,18 @@ export function JobDetail({ job, track, today, onClose }: { job: Job | null; tra
     setWarnUnsaved(false);
     setError("");
     setClosing(false);
+    setLogDate(today);
+    setLogText("");
+    setEditingId(null);
+    setLogBusy(false);
+    setLogError("");
   }, [jobId]);
 
   if (!job) return null;
   const dirty = notes !== job.notes;
+  const jobLogs = logs
+    .filter((entry) => entry.jobKey === job.key)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt));
 
   function requestClose() {
     if (dirty) setWarnUnsaved(true);
@@ -66,6 +83,47 @@ export function JobDetail({ job, track, today, onClose }: { job: Job | null; tra
       return false;
     } finally {
       setSaving(false);
+    }
+  }
+
+  function startEdit(entry: Log) {
+    setEditingId(entry.id);
+    setLogDate(entry.date);
+    setLogText(entry.log);
+    setLogError("");
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setLogDate(today);
+    setLogText("");
+    setLogError("");
+  }
+
+  async function submitLog() {
+    if (!job) return;
+    setLogBusy(true);
+    setLogError("");
+    try {
+      if (editingId) await setLog(editingId, logDate, logText);
+      else await addLog(job.key, logDate, logText);
+      setEditingId(null);
+      setLogDate(today);
+      setLogText("");
+    } catch (cause) {
+      setLogError(cause instanceof Error ? cause.message : "Couldn't save the log entry.");
+    } finally {
+      setLogBusy(false);
+    }
+  }
+
+  async function removeLog(entry: Log) {
+    setLogError("");
+    try {
+      await deleteLog(entry.id);
+      if (editingId === entry.id) cancelEdit();
+    } catch (cause) {
+      setLogError(cause instanceof Error ? cause.message : "Couldn't delete the log entry.");
     }
   }
 
@@ -179,6 +237,72 @@ export function JobDetail({ job, track, today, onClose }: { job: Job | null; tra
           ))}
         </div>
       ) : null}
+
+      <Section title="Log">
+        {jobLogs.length ? (
+          <ul class="space-y-3">
+            {jobLogs.map((entry) =>
+              editingId === entry.id ? (
+                <li key={entry.id} class="rounded-lg border border-line bg-canvas p-3">
+                  <label class="block text-sm">
+                    <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-ink-muted">Date</span>
+                    <Input type="date" aria-label="Log entry date" value={logDate} onInput={(e) => setLogDate((e.currentTarget as HTMLInputElement).value)} />
+                  </label>
+                  <label class="mt-2 block text-sm">
+                    <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-ink-muted">Entry (Markdown)</span>
+                    <TextArea rows={4} value={logText} aria-label="Log entry markdown" onInput={(e) => setLogText((e.currentTarget as HTMLTextAreaElement).value)} />
+                  </label>
+                  <div class="mt-2 flex flex-wrap items-center gap-2">
+                    <Button size="sm" disabled={logBusy || !logText.trim()} loading={logBusy} onClick={() => void submitLog()}>
+                      Save
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={cancelEdit}>
+                      Cancel
+                    </Button>
+                  </div>
+                </li>
+              ) : (
+                <li key={entry.id} class="rounded-lg border border-line bg-canvas p-3">
+                  <div class="flex items-start justify-between gap-2">
+                    <p class="text-xs font-semibold uppercase tracking-wide text-ink-muted">{formatDate(entry.date)}</p>
+                    <div class="flex shrink-0 items-center gap-1">
+                      <Button size="sm" variant="ghost" aria-label="Edit log entry" icon="pencil" onClick={() => startEdit(entry)} />
+                      <Button size="sm" variant="ghost" aria-label="Delete log entry" icon="trash-2" onClick={() => void removeLog(entry)} />
+                    </div>
+                  </div>
+                  <div class="mt-1 text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(entry.log) }} />
+                </li>
+              ),
+            )}
+          </ul>
+        ) : (
+          <p class="text-ink-muted">No entries yet.</p>
+        )}
+
+        {editingId === null ? (
+          <div class="mt-3 rounded-lg border border-line bg-canvas p-3">
+            <label class="block text-sm">
+              <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-ink-muted">Date</span>
+              <Input type="date" aria-label="New log entry date" value={logDate} onInput={(e) => setLogDate((e.currentTarget as HTMLInputElement).value)} />
+            </label>
+            <label class="mt-2 block text-sm">
+              <span class="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-ink-muted">Entry (Markdown)</span>
+              <TextArea rows={4} value={logText} aria-label="New log entry markdown" placeholder="What happened, e.g. *Applied* — recruiter replied." onInput={(e) => setLogText((e.currentTarget as HTMLTextAreaElement).value)} />
+            </label>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <Button size="sm" disabled={logBusy || !logText.trim()} loading={logBusy} onClick={() => void submitLog()}>
+                Add entry
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {logError ? (
+          <div class="mt-3">
+            <Alert tone="danger">{logError}</Alert>
+          </div>
+        ) : null}
+      </Section>
 
       <Section title="Your notes">
         <TextArea

@@ -4,11 +4,14 @@ import { beforeEach, describe, test } from "node:test";
 import { canonicalUrl, isHttpUrl, isIsoDate, validateJobs } from "../shared/contract";
 import { join, memberOrNull, requireMember, seatsLeft, signedInOwnerIds, viewerOf } from "../server/access";
 import {
+  addLog,
+  addLogs,
   agentContext,
   authenticateAgent,
   createHandoff,
   createMcpKey,
   deleteAccount,
+  deleteLog,
   logRun,
   redeemHandoff,
   saveCompanyIcons,
@@ -17,6 +20,7 @@ import {
   saveNotes,
   saveProfile,
   saveTracks,
+  setLog,
   setStatus,
   workspace,
 } from "../server/data";
@@ -371,7 +375,7 @@ describe("delete my data", () => {
     await createHandoff(ctx, (await memberOrNull(ctx))!, "update");
 
     const deleted = await deleteAccount(ctx, await signedInOwnerIds(ctx));
-    assert.deepEqual(deleted, { jobs: 1, tracks: 2, profiles: 1, runs: 1, agentKeys: 1, handoffs: 2, members: 1 });
+    assert.deepEqual(deleted, { jobs: 1, tracks: 2, profiles: 1, runs: 1, agentKeys: 1, handoffs: 2, members: 1, logs: 0 });
     for (const [table, rows] of db.tables) {
       assert.ok(rows.every((row) => row.ownerId !== will.key.ownerId), `${table} keeps nothing of Will's`);
     }
@@ -416,7 +420,7 @@ describe("MCP endpoint", () => {
     const tools = await rpc(apiKey, { jsonrpc: "2.0", id: 3, method: "tools/list" });
     assert.deepEqual(
       tools.body.result.tools.map((t: any) => t.name),
-      ["get_instructions", "get_context", "save_profile", "save_tracks", "save_jobs", "save_company_icons", "log_run"],
+      ["get_instructions", "get_context", "save_profile", "save_tracks", "save_jobs", "save_company_icons", "log_run", "add_logs"],
     );
   });
 
@@ -590,6 +594,79 @@ describe("upgrading data from before encryption", () => {
     const { ctx } = makeCtx(db, WILL, env);
     await deleteAccount(ctx, await signedInOwnerIds(ctx));
     assert.equal([...db.tables.values()].flat().length, 0);
+  });
+});
+
+describe("logs", () => {
+  async function withJob(db: FakeDb, who: NonNullable<Identity> = WILL) {
+    const { ctx, member } = await joined(db, who);
+    await saveTracks(ctx, member.ownerId, TRACKS);
+    await saveJobs(ctx, member.ownerId, [job()]);
+    return { ctx, member };
+  }
+
+  test("an agent appends entries but never reads them back", async () => {
+    const db = new FakeDb();
+    const { member } = await withJob(db);
+    const { key, ctx: anon } = await connect(db);
+    await addLogs(anon, key.ownerId, [{ jobKey: "acme-platform-em", date: today, log: "*Applied* — recruiter replied." }]);
+    const context = await agentContext(anon, key.ownerId);
+    assert.ok(!("logs" in context), "logs never reach the agent context");
+    assert.ok(!JSON.stringify(context).includes("recruiter"));
+    const view = await workspace(makeCtx(db, WILL).ctx, member.ownerId);
+    assert.equal(view.logs.length, 1);
+    assert.equal(view.logs[0].date, today);
+    assert.equal(view.logs[0].log, "*Applied* — recruiter replied.");
+  });
+
+  test("a batch with an unknown jobKey saves nothing", async () => {
+    const db = new FakeDb();
+    await withJob(db);
+    const { key, ctx: anon } = await connect(db);
+    await assert.rejects(
+      addLogs(anon, key.ownerId, [
+        { jobKey: "acme-platform-em", date: today, log: "ok" },
+        { jobKey: "does-not-exist", date: today, log: "bad" },
+      ]),
+      /isn't a tracked job/,
+    );
+    assert.equal(db.rows("logs").length, 0);
+  });
+
+  test("the user can add, edit and delete their own entries", async () => {
+    const db = new FakeDb();
+    const { ctx, member } = await withJob(db);
+    await addLog(ctx, member.ownerId, "acme-platform-em", today, "First note.");
+    await addLog(ctx, member.ownerId, "acme-platform-em", today, "Second note.");
+    const view = await workspace(ctx, member.ownerId);
+    assert.equal(view.logs.length, 2);
+    const [a, b] = view.logs;
+    await setLog(ctx, member.ownerId, a.id, today, "Edited note.");
+    await deleteLog(ctx, member.ownerId, b.id);
+    const after = await workspace(ctx, member.ownerId);
+    assert.equal(after.logs.length, 1);
+    assert.equal(after.logs[0].log, "Edited note.");
+
+    const { ctx: anaCtx, member: anaMember } = await joined(db, ANA);
+    await assert.rejects(setLog(anaCtx, anaMember.ownerId, a.id, today, "hijack"), /isn't yours/);
+    await assert.rejects(deleteLog(anaCtx, anaMember.ownerId, a.id), /isn't yours/);
+  });
+
+  test("entries are sealed at rest; the date stays plain", async () => {
+    const db = new FakeDb();
+    const { ctx, member } = await withJob(db);
+    await addLog(ctx, member.ownerId, "acme-platform-em", today, "Private activity.");
+    const stored = db.rows("logs")[0];
+    assert.equal(stored.date, today);
+    assert.ok(stored.log.startsWith("e1."), "sealed envelope");
+    assert.ok(!stored.log.includes("Private"));
+  });
+
+  test("bad dates and empty entries are rejected", async () => {
+    const db = new FakeDb();
+    const { ctx, member } = await withJob(db);
+    await assert.rejects(addLog(ctx, member.ownerId, "acme-platform-em", "2026-02-30", "x"), /must be a real date/);
+    await assert.rejects(addLog(ctx, member.ownerId, "acme-platform-em", today, "   "), /must not be empty/);
   });
 });
 

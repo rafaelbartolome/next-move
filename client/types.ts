@@ -60,7 +60,16 @@ export type Job = {
   updatedAt: string;
 };
 
-export type Workspace = { today: string; profile: Profile | null; tracks: Track[]; jobs: Job[] };
+export type Log = {
+  id: string;
+  jobKey: string;
+  date: string;
+  log: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Workspace = { today: string; profile: Profile | null; tracks: Track[]; jobs: Job[]; logs: Log[] };
 
 export type AgentKey = {
   id: string;

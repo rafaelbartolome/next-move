@@ -16,12 +16,15 @@ import { agentGuide } from "../shared/prompts";
 import { join, memberOrNull, requireMember, signedInOwnerIds, viewerOf } from "./access";
 import {
   RequestError,
+  addLog,
+  addLogs,
   agentActivity,
   agentContext,
   authenticateAgent,
   createHandoff,
   createMcpKey,
   deleteAccount,
+  deleteLog,
   logRun,
   redeemHandoff,
   revokeKey,
@@ -30,6 +33,7 @@ import {
   saveNotes,
   saveProfile,
   saveTracks,
+  setLog,
   setStatus,
   setTrackActive,
   workspace,
@@ -181,6 +185,12 @@ export default capsule({
       updated: string(),
       closed: string(),
     }).index("by_owner", ["ownerId"]),
+    logs: table({
+      ownerId: string(),
+      jobKey: string(),
+      date: string(),
+      log: string(),
+    }).index("by_owner", ["ownerId"]),
   },
 
   queries: {
@@ -208,6 +218,15 @@ export default capsule({
     }),
     setTrackActive: mutation(async (ctx, trackId: string, active: boolean) => {
       await setTrackActive(ctx, (await requireMember(ctx)).ownerId, trackId, active);
+    }),
+    addLog: mutation(async (ctx, jobKey: string, date: string, log: string) => {
+      await addLog(ctx, (await requireMember(ctx)).ownerId, jobKey, date, log);
+    }),
+    setLog: mutation(async (ctx, logId: string, date: string, log: string) => {
+      await setLog(ctx, (await requireMember(ctx)).ownerId, logId, date, log);
+    }),
+    deleteLog: mutation(async (ctx, logId: string) => {
+      await deleteLog(ctx, (await requireMember(ctx)).ownerId, logId);
     }),
     createHandoff: mutation(async (ctx, purpose: "onboarding" | "update") => createHandoff(ctx, await requireMember(ctx), purpose)),
     createMcpKey: mutation(async (ctx, label: string) => createMcpKey(ctx, await requireMember(ctx), label)),
@@ -252,6 +271,9 @@ export default capsule({
     ),
     runs: endpoint({ method: "POST", path: "/api/agent/runs" }, (ctx, req) =>
       asAgent(ctx, req, async (key) => logRun(ctx, key, await readBody(req))),
+    ),
+    logs: endpoint({ method: "POST", path: "/api/agent/logs" }, (ctx, req) =>
+      asAgent(ctx, req, async (key) => addLogs(ctx, key.ownerId, (await readBody(req)).logs)),
     ),
     mcp: endpoint({ method: "POST", path: "/mcp" }, (ctx, req) => handleMcp(ctx, req)),
     mcpGet: endpoint({ method: "GET", path: "/mcp" }, notAllowed),
