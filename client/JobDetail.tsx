@@ -5,7 +5,7 @@ import { Alert, Badge, Button, Input, TextArea } from "@spacefast/zero/kit";
 import { ELIGIBILITY_LABELS, STATUSES, STATUS_LABELS, WORKPLACE_LABELS, type Status } from "../shared/contract";
 import type { Job, Log, Track } from "./types";
 import { Drawer } from "./Drawer";
-import { renderMarkdown } from "./markdown";
+import { Markdown } from "./Markdown";
 import { CompanyMark, FitBadge, Select, formatDate, formatDateTime, needsRecheck } from "./ui";
 
 function Section({ title, children }: { title: string; children: ComponentChildren }) {
@@ -270,7 +270,9 @@ export function JobDetail({ job, track, today, logs, onClose }: { job: Job | nul
                       <Button size="sm" variant="ghost" aria-label="Delete log entry" icon="trash-2" onClick={() => void removeLog(entry)} />
                     </div>
                   </div>
-                  <div class="mt-1 text-sm leading-relaxed text-ink" dangerouslySetInnerHTML={{ __html: renderMarkdown(entry.log) }} />
+                  <div class="mt-1 text-sm leading-relaxed text-ink">
+                    <Markdown text={entry.log} />
+                  </div>
                 </li>
               ),
             )}
