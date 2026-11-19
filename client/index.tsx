@@ -14,6 +14,17 @@ const NAV = [
 // The staging Space gets a visually distinct sidebar so it can't be mistaken for production.
 const isStaging = typeof location !== "undefined" && location.hostname.includes("staging");
 
+/** The platform's generated mark, in red, for the staging tab. Production keeps the generated green one. */
+const STAGING_FAVICON =
+  "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23c62828%22%2F%3E%3Ctext%20x%3D%2232%22%20y%3D%2243%22%20text-anchor%3D%22middle%22%20font-family%3D%22system-ui%2Csans-serif%22%20font-size%3D%2236%22%20font-weight%3D%22700%22%20fill%3D%22white%22%3EN%3C%2Ftext%3E%3C%2Fsvg%3E";
+
+if (isStaging && typeof document !== "undefined") {
+  const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]') ?? document.createElement("link");
+  icon.rel = "icon";
+  icon.href = STAGING_FAVICON;
+  if (!icon.isConnected) document.head.append(icon);
+}
+
 function Brand({ inverted }: { inverted?: boolean }) {
   return (
     <span class="flex items-center gap-3">
