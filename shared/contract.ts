@@ -30,6 +30,8 @@ export const LIMITS = {
   tracksPerUser: 12,
   notes: 20000,
   listItems: 12,
+  log: 20000,
+  logsPerSave: 25,
 };
 
 export type ProfileInput = {
@@ -87,6 +89,8 @@ export type JobInput = {
 };
 
 export type RunInput = { summary: string; added: number; updated: number; closed: number };
+
+export type LogInput = { jobKey: string; date: string; log: string };
 
 /** Every problem found in a payload, so an agent can fix them all in one pass. */
 export class ContractError extends Error {
@@ -373,6 +377,30 @@ export function validateRun(raw: unknown): RunInput {
   };
   if (r.problems.length) throw new ContractError(r.problems);
   return run;
+}
+
+export function validateLogs(raw: unknown, today: string): LogInput[] {
+  if (!Array.isArray(raw) || raw.length === 0) throw new ContractError(["logs must be a non-empty array"]);
+  if (raw.length > LIMITS.logsPerSave) {
+    throw new ContractError([`Send at most ${LIMITS.logsPerSave} log entries per call (got ${raw.length})`]);
+  }
+  const r = new Reader();
+  const logs = raw.map((item, index): LogInput => {
+    const label = `logs[${index}]`;
+    if (!isObject(item)) {
+      r.problems.push(`${label} must be an object`);
+      return { jobKey: "", date: "", log: "" };
+    }
+    const jobKey = r.text(item, "jobKey", `${label}.jobKey`, { max: 100, required: true });
+    if (jobKey && !KEY_PATTERN.test(jobKey)) r.problems.push(`${label}.jobKey must be lowercase words joined by dashes`);
+    return {
+      jobKey,
+      date: r.date(item, "date", `${label}.date`, today, true),
+      log: r.text(item, "log", `${label}.log`, { max: LIMITS.log, required: true }),
+    };
+  });
+  if (r.problems.length) throw new ContractError(r.problems);
+  return logs;
 }
 
 export const STATUS_LABELS: Record<Status, string> = {

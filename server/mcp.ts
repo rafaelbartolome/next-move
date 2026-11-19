@@ -12,7 +12,7 @@ import {
   WORKPLACES,
 } from "../shared/contract";
 import { agentGuide } from "../shared/prompts";
-import { agentContext, authenticateAgent, logRun, saveCompanyIcons, saveJobs, saveProfile, saveTracks, type KeyRow } from "./data";
+import { addLogs, agentContext, authenticateAgent, logRun, saveCompanyIcons, saveJobs, saveProfile, saveTracks, type KeyRow } from "./data";
 
 const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26"];
 
@@ -94,6 +94,16 @@ const JOB_SCHEMA = {
     "key", "trackKey", "title", "company", "applyUrl", "location", "eligibility",
     "workplace", "fit", "fitSummary", "source", "lastVerified", "openingStatus",
   ],
+};
+
+const LOG_SCHEMA = {
+  type: "object",
+  properties: {
+    jobKey: str("Key of a tracked job"),
+    date: str("YYYY-MM-DD of the entry"),
+    log: str("Markdown entry text"),
+  },
+  required: ["jobKey", "date", "log"],
 };
 
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
@@ -186,6 +196,17 @@ const TOOLS = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   },
+  {
+    name: "add_logs",
+    title: "Add log entries",
+    description: "Append dated markdown log entries to tracked openings. Agents can add entries but never read them back.",
+    inputSchema: {
+      type: "object",
+      properties: { logs: { type: "array", items: LOG_SCHEMA, minItems: 1, maxItems: LIMITS.logsPerSave } },
+      required: ["logs"],
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
 ];
 
 const INSTRUCTIONS =
@@ -226,6 +247,8 @@ async function callTool(ctx: ServerContext, key: KeyRow, name: string, args: Rec
       return toolResult(await saveCompanyIcons(ctx, key.ownerId, args.icons));
     case "log_run":
       return toolResult(await logRun(ctx, key, args));
+    case "add_logs":
+      return toolResult(await addLogs(ctx, key.ownerId, args.logs));
     default:
       return null;
   }

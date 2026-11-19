@@ -4,6 +4,19 @@ A multi-user job-search tracker where **users bring their own AI**. Next move ne
 
 Built on Spacefast's [Zero runtime](https://spacefast.com/docs/zero-runtime/): TypeScript and Preact, a MySQL database per Space, and built-in visitor sign-in (Google, WordPress.com).
 
+## Documentation
+
+Engineering documentation lives in [`docs/`](docs/README.md):
+
+| Document | Covers |
+| --- | --- |
+| [Architecture](docs/architecture.md) | System context, components, module graph, request paths, design decisions |
+| [Data model](docs/data-model.md) | Tables, fields, indexes, encryption classification, limits and invariants |
+| [Flows](docs/flows.md) | Sign-in/join, prompt handoff, MCP, onboarding, update runs, deletion, legacy upgrade |
+| [Security](docs/security.md) | Trust boundaries, authn/authz, crypto scheme, threat model and residual risks |
+| [API](docs/api.md) | REST routes, MCP tools, payloads, validation and error semantics |
+| [Operations](docs/operations.md) | Dependencies, environment, publishing, testing, limitations and runbooks |
+
 ## How agents connect
 
 | Lane | How | Works with |
@@ -70,6 +83,7 @@ server/mcp.ts        Stateless MCP over Streamable HTTP (JSON responses)
 server/index.ts      Schema, queries, mutations, HTTP endpoints
 client/, pages/      UI (Opportunities, Your agent, Profile & roles)
 tests/               Node tests against an in-memory fake of the Zero context
+docs/                Architecture, data model, flows, security, API and operations
 ```
 
 ## Configuration
