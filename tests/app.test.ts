@@ -652,6 +652,28 @@ describe("logs", () => {
     await assert.rejects(deleteLog(anaCtx, anaMember.ownerId, a.id), /isn't yours/);
   });
 
+  test("the workspace lists entries newest first, by date and then creation", async () => {
+    const db = new FakeDb();
+    const { ctx, member } = await withJob(db);
+    await addLog(ctx, member.ownerId, "acme-platform-em", "2026-01-01", "Oldest.");
+    await addLog(ctx, member.ownerId, "acme-platform-em", "2026-03-01", "Newest.");
+    await addLog(ctx, member.ownerId, "acme-platform-em", "2026-02-01", "Middle.");
+    await addLog(ctx, member.ownerId, "acme-platform-em", "2026-02-01", "Same day, later.");
+    const view = await workspace(ctx, member.ownerId);
+    assert.deepEqual(view.logs.map((entry) => entry.log), ["Newest.", "Same day, later.", "Middle.", "Oldest."]);
+  });
+
+  test("entries written at the same instant still put the later one first", async () => {
+    const db = new FakeDb();
+    const { ctx, member } = await withJob(db);
+    await addLog(ctx, member.ownerId, "acme-platform-em", today, "First.");
+    await addLog(ctx, member.ownerId, "acme-platform-em", today, "Second.");
+    const rows = db.rows("logs");
+    rows[0].createdAt = rows[1].createdAt; // a batch can share a timestamp
+    const view = await workspace(ctx, member.ownerId);
+    assert.deepEqual(view.logs.map((entry) => entry.log), ["Second.", "First."]);
+  });
+
   test("entries are sealed at rest; the date stays plain", async () => {
     const db = new FakeDb();
     const { ctx, member } = await withJob(db);

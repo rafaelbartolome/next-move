@@ -350,7 +350,7 @@ Code"), not the person's name or email.
 | `handoffs` | `by_owner`, `by_hash` | List by owner; redeem by `codeHash`. |
 | `members` | `by_owner`, plus built-in `by_creation` | Member lookup by owner; seat count in creation order. |
 | `runs` | `by_owner` | All rows, sorted in memory, latest 20 decrypted and shown. |
-| `logs` | `by_owner` | All rows, grouped by `jobKey` in memory, sorted by date. |
+| `logs` | `by_owner` | All rows, grouped by `jobKey` in memory, newest first by date. |
 
 There is no index on `jobs.key`, `tracks.key` or `jobs.trackKey`. The owner scan is the
 selectivity boundary; dedupe and uniqueness are in-memory checks. With a 1,000-job cap that
