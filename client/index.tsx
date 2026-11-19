@@ -11,6 +11,9 @@ const NAV = [
   { to: "/profile", label: "Profile & roles", glyph: "◉" },
 ];
 
+// The staging Space gets a visually distinct sidebar so it can't be mistaken for production.
+const isStaging = typeof location !== "undefined" && location.hostname.includes("staging");
+
 function Brand({ inverted }: { inverted?: boolean }) {
   return (
     <span class="flex items-center gap-3">
@@ -152,7 +155,12 @@ function Shell({ viewer, children }: { viewer: Extract<Viewer, { state: "member"
       <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded focus:bg-surface focus:px-3 focus:py-2">
         Skip to content
       </a>
-      <aside class="bg-[#182e2a] text-[#dce4db] md:fixed md:inset-y-0 md:left-0 md:flex md:w-60 md:flex-col md:px-5 md:py-8">
+      <aside
+        class={
+          "md:fixed md:inset-y-0 md:left-0 md:flex md:w-60 md:flex-col md:px-5 md:py-8 " +
+          (isStaging ? "bg-[#8a1a1a] text-[#f2dcdc]" : "bg-[#182e2a] text-[#dce4db]")
+        }
+      >
         <div class="flex items-center justify-between px-4 py-3 md:block md:p-0">
           <Link to="/" aria-label="Next move home">
             <Brand inverted />
@@ -179,6 +187,11 @@ function Shell({ viewer, children }: { viewer: Extract<Viewer, { state: "member"
           ))}
         </nav>
         <div class="mt-auto hidden border-t border-white/10 pt-5 md:block">
+          {isStaging ? (
+            <div class="mb-4 rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-widest text-amber-300">
+              Staging
+            </div>
+          ) : null}
           <p class="truncate text-sm font-medium text-white">{viewer.displayName}</p>
           {viewer.email ? <p class="truncate text-xs text-[#9fb3a6]">{viewer.email}</p> : null}
           <button type="button" class="mt-3 text-xs text-[#9fb3a6] underline-offset-2 hover:text-white hover:underline" onClick={() => void signOut()}>
