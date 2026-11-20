@@ -1,15 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { Link, useMutation, useQuery } from "@spacefast/zero/client";
 import { Badge, Button, EmptyState, Input, Spinner } from "@spacefast/zero/kit";
-import { STATUSES, STATUS_LABELS, WORKPLACE_LABELS, type Status } from "../shared/contract";
+import { FITS, OPENING_STATUSES, STATUSES, STATUS_LABELS, WORKPLACE_LABELS, type Status } from "../shared/contract";
 import { JobDetail } from "../client/JobDetail";
 import type { Job, Workspace } from "../client/types";
 import { Chip, CompanyMark, FitBadge, NewBadge, PageHeading, Select, formatDate, isNew, needsRecheck, trackSalary } from "../client/ui";
 
 type View = "active" | "shortlisted" | "applied" | "interviewing" | "offer" | "closed_out" | "not_interested";
-type Sort = "fit" | "found" | "verified" | "company" | "activity";
+const SORTS = ["fit", "found", "verified", "company", "activity"] as const;
+type Sort = (typeof SORTS)[number];
 
 const VIEWS: { id: View; label: string; matches: (status: Status) => boolean }[] = [
   { id: "active", label: "In play", matches: (s) => !["rejected", "withdrawn", "not_interested"].includes(s) },
@@ -20,6 +21,50 @@ const VIEWS: { id: View; label: string; matches: (status: Status) => boolean }[]
   { id: "closed_out", label: "Closed out", matches: (s) => s === "rejected" || s === "withdrawn" },
   { id: "not_interested", label: "Not interested", matches: (s) => s === "not_interested" },
 ];
+
+const FILTERS_KEY = "nextmove.filters.v1";
+const FIT_FILTERS = ["all", ...FITS] as const;
+const AVAILABILITY_FILTERS = ["all", ...OPENING_STATUSES] as const;
+
+type Filters = { view: View; search: string; trackKey: string; fit: string; availability: string; sort: Sort };
+
+const DEFAULT_FILTERS: Filters = { view: "active", search: "", trackKey: "all", fit: "all", availability: "all", sort: "fit" };
+
+/**
+ * Filters live in localStorage so a reload keeps the view, search, role, match,
+ * availability and sort the user was looking at. Stored values are checked against
+ * the current options, so an old or hand-edited value can't hide every row.
+ */
+function restoreFilters(): Filters {
+  if (typeof localStorage === "undefined") return DEFAULT_FILTERS;
+  try {
+    const raw = localStorage.getItem(FILTERS_KEY);
+    if (!raw) return DEFAULT_FILTERS;
+    const saved = JSON.parse(raw) as Partial<Filters> | null;
+    if (!saved || typeof saved !== "object") return DEFAULT_FILTERS;
+    return {
+      view: VIEWS.some((v) => v.id === saved.view) ? (saved.view as View) : DEFAULT_FILTERS.view,
+      search: typeof saved.search === "string" ? saved.search : DEFAULT_FILTERS.search,
+      trackKey: typeof saved.trackKey === "string" ? saved.trackKey : DEFAULT_FILTERS.trackKey,
+      fit: (FIT_FILTERS as readonly string[]).includes(saved.fit ?? "") ? (saved.fit as string) : DEFAULT_FILTERS.fit,
+      availability: (AVAILABILITY_FILTERS as readonly string[]).includes(saved.availability ?? "")
+        ? (saved.availability as string)
+        : DEFAULT_FILTERS.availability,
+      sort: (SORTS as readonly string[]).includes(saved.sort ?? "") ? (saved.sort as Sort) : DEFAULT_FILTERS.sort,
+    };
+  } catch {
+    return DEFAULT_FILTERS;
+  }
+}
+
+function saveFilters(filters: Filters): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(FILTERS_KEY, JSON.stringify(filters));
+  } catch {
+    // Private mode or a full store: the filters still work for this visit.
+  }
+}
 
 const FIT_RANK = { strong: 0, good: 1, stretch: 2 } as const;
 
@@ -136,17 +181,26 @@ function JobRow({ job, today, trackTitle, onOpen }: { job: Job; today: string; t
 
 export default function OpportunitiesPage() {
   const data = useQuery<Workspace | null>("workspace");
-  const [view, setView] = useState<View>("active");
-  const [search, setSearch] = useState("");
-  const [trackKey, setTrackKey] = useState("all");
-  const [fit, setFit] = useState("all");
-  const [availability, setAvailability] = useState("all");
-  const [sort, setSort] = useState<Sort>("fit");
+  const [filters, setFilters] = useState<Filters>(restoreFilters);
+  const { view, search, trackKey, fit, availability, sort } = filters;
   const [openId, setOpenId] = useState<string | null>(null);
 
   const jobs = data?.jobs ?? [];
   const tracks = data?.tracks ?? [];
   const trackTitles = useMemo(() => new Map(tracks.map((t) => [t.key, t.title])), [tracks]);
+
+  const updateFilters = (patch: Partial<Filters>) => setFilters((current) => ({ ...current, ...patch }));
+
+  useEffect(() => {
+    saveFilters(filters);
+  }, [filters]);
+
+  // A saved role can disappear when roles are edited. Fall back to "all roles" rather than
+  // showing an empty list behind a filter that no longer exists.
+  useEffect(() => {
+    if (trackKey === "all" || tracks.length === 0) return;
+    if (!tracks.some((track) => track.key === trackKey)) setFilters((current) => ({ ...current, trackKey: "all" }));
+  }, [trackKey, tracks]);
 
   const visible = useMemo(() => {
     const viewDef = VIEWS.find((v) => v.id === view) ?? VIEWS[0];
@@ -241,7 +295,7 @@ export default function OpportunitiesPage() {
                       ? "-mb-px shrink-0 border-b-2 border-[#182e2a] px-3 py-2 text-sm font-semibold text-ink dark:border-[#d8efa4]"
                       : "-mb-px shrink-0 border-b-2 border-transparent px-3 py-2 text-sm text-ink-muted hover:text-ink"
                   }
-                  onClick={() => setView(v.id)}
+                  onClick={() => updateFilters({ view: v.id })}
                 >
                   {v.label} <span class="tabular-nums text-ink-muted">{n}</span>
                 </button>
@@ -255,9 +309,9 @@ export default function OpportunitiesPage() {
               placeholder="Search roles, companies, skills…"
               aria-label="Search roles, companies and skills"
               value={search}
-              onInput={(event) => setSearch((event.currentTarget as HTMLInputElement).value)}
+              onInput={(event) => updateFilters({ search: (event.currentTarget as HTMLInputElement).value })}
             />
-            <Select aria-label="Role" value={trackKey} onChange={(e) => setTrackKey((e.currentTarget as HTMLSelectElement).value)}>
+            <Select aria-label="Role" value={trackKey} onChange={(e) => updateFilters({ trackKey: (e.currentTarget as HTMLSelectElement).value })}>
               <option value="all">All roles</option>
               {tracks.map((t) => (
                 <option key={t.key} value={t.key}>
@@ -265,19 +319,19 @@ export default function OpportunitiesPage() {
                 </option>
               ))}
             </Select>
-            <Select aria-label="Match" value={fit} onChange={(e) => setFit((e.currentTarget as HTMLSelectElement).value)}>
+            <Select aria-label="Match" value={fit} onChange={(e) => updateFilters({ fit: (e.currentTarget as HTMLSelectElement).value })}>
               <option value="all">All matches</option>
               <option value="strong">Strong match</option>
               <option value="good">Good match</option>
               <option value="stretch">Stretch</option>
             </Select>
-            <Select aria-label="Listing availability" value={availability} onChange={(e) => setAvailability((e.currentTarget as HTMLSelectElement).value)}>
+            <Select aria-label="Listing availability" value={availability} onChange={(e) => updateFilters({ availability: (e.currentTarget as HTMLSelectElement).value })}>
               <option value="all">Any availability</option>
               <option value="open">Open listings</option>
               <option value="unknown">Unconfirmed</option>
               <option value="closed">Closed listings</option>
             </Select>
-            <Select aria-label="Sort" value={sort} onChange={(e) => setSort((e.currentTarget as HTMLSelectElement).value as Sort)}>
+            <Select aria-label="Sort" value={sort} onChange={(e) => updateFilters({ sort: (e.currentTarget as HTMLSelectElement).value as Sort })}>
               <option value="fit">Best match first</option>
               <option value="found">Newest found first</option>
               <option value="verified">Recently verified</option>
@@ -304,10 +358,7 @@ export default function OpportunitiesPage() {
                       <Button
                         variant="outline"
                         onClick={() => {
-                          setSearch("");
-                          setTrackKey("all");
-                          setFit("all");
-                          setAvailability("all");
+                          updateFilters({ search: "", trackKey: "all", fit: "all", availability: "all" });
                         }}
                       >
                         Clear filters
